@@ -157,23 +157,16 @@ def main():
                         
                         st.info(f"Processing transactions from: {uploaded_file.name}")
                         
-                        # Call the AI processing function.
+                        # Call the AI processing function and extend the list with the results.
                         transactions = process_with_ai(full_text)
-                        
-                        # Add a new column to track the source file.
-                        if transactions:
-                            for tx in transactions:
-                                tx['source_file'] = uploaded_file.name
-                            all_transactions.extend(transactions)
-                        else:
-                            st.warning(f"No transactions could be extracted from {uploaded_file.name}.")
+                        all_transactions.extend(transactions)
 
                     except Exception as e:
                         st.error(f"Error reading PDF {uploaded_file.name}: {e}")
                 
                 # After processing all files, create a single DataFrame.
                 if all_transactions:
-                    df = pd.DataFrame(all_transactions, columns=['source_file', 'date', 'description', 'amount'])
+                    df = pd.DataFrame(all_transactions, columns=['date', 'description', 'amount'])
                     
                     # Convert DataFrame to CSV.
                     csv_data = df.to_csv(index=False)
@@ -199,6 +192,8 @@ def main():
 # Run the main function when the script is executed.
 if __name__ == "__main__":
     main()
+
+
 
 
 
