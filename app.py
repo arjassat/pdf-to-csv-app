@@ -127,46 +127,53 @@ def main():
     Supported Banks: FNB, Nedbank, Standard Bank, ABSA, and HBZ.
     """)
 
-    # File uploader widget to let the user upload a PDF.
-    uploaded_file = st.file_uploader(
-        "Upload a PDF bank statement:",
+    # File uploader widget to let the user upload multiple PDFs.
+    uploaded_files = st.file_uploader(
+        "Upload your PDF bank statements:",
         type="pdf",
-        accept_multiple_files=False,
+        accept_multiple_files=True,
         key="pdf_uploader"
     )
 
-    # Check if a file has been uploaded by the user.
-    if uploaded_file:
-        # Show a spinner to indicate that the app is working.
-        with st.spinner("Processing PDF and extracting text..."):
-            try:
-                # Read the uploaded PDF file's content in memory.
-                pdf_bytes = uploaded_file.getvalue()
-                pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+    # Check if files have been uploaded by the user.
+    if uploaded_files:
+        if st.button("Convert All to CSV"):
+            with st.spinner("🚀 Processing files and extracting transactions... This may take a moment."):
+                all_transactions = []
+                # Loop through each uploaded file.
+                for uploaded_file in uploaded_files:
+                    try:
+                        # Read the uploaded PDF file's content in memory.
+                        pdf_bytes = uploaded_file.getvalue()
+                        pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+                        
+                        # Extract all text from the PDF.
+                        full_text = ""
+                        for page_num in range(len(pdf_document)):
+                            page = pdf_document.load_page(page_num)
+                            full_text += page.get_text()
+                        
+                        pdf_document.close()
+                        
+                        st.info(f"Processing transactions from: {uploaded_file.name}")
+                        
+                        # Call the AI processing function.
+                        transactions = process_with_ai(full_text)
+                        
+                        # Add a new column to track the source file.
+                        if transactions:
+                            for tx in transactions:
+                                tx['source_file'] = uploaded_file.name
+                            all_transactions.extend(transactions)
+                        else:
+                            st.warning(f"No transactions could be extracted from {uploaded_file.name}.")
+
+                    except Exception as e:
+                        st.error(f"Error reading PDF {uploaded_file.name}: {e}")
                 
-                # Extract all text from the PDF.
-                full_text = ""
-                for page_num in range(len(pdf_document)):
-                    page = pdf_document.load_page(page_num)
-                    full_text += page.get_text()
-                
-                pdf_document.close()
-                st.success("PDF text extracted successfully!")
-
-            except Exception as e:
-                st.error(f"Error reading PDF: {e}")
-                return # Stop execution if PDF reading fails.
-
-        # Use a button to start the AI processing.
-        if st.button("Convert to CSV"):
-            with st.spinner("🚀 Sending to AI for transaction extraction... This may take a moment."):
-                # Call the AI processing function.
-                transactions = process_with_ai(full_text)
-
-                if transactions:
-                    # Convert the list of dictionaries to a pandas DataFrame.
-                    # We explicitly set the columns here to ensure the order is correct.
-                    df = pd.DataFrame(transactions, columns=['date', 'description', 'amount'])
+                # After processing all files, create a single DataFrame.
+                if all_transactions:
+                    df = pd.DataFrame(all_transactions, columns=['source_file', 'date', 'description', 'amount'])
                     
                     # Convert DataFrame to CSV.
                     csv_data = df.to_csv(index=False)
@@ -177,18 +184,19 @@ def main():
                     
                     # Create a download button for the CSV file.
                     st.download_button(
-                        label="Download CSV",
+                        label="Download Combined CSV",
                         data=csv_bytes,
                         file_name="bank_transactions.csv",
                         mime="text/csv"
                     )
                 else:
-                    st.warning("No transactions could be extracted from the PDF.")
+                    st.warning("No transactions could be extracted from any of the uploaded PDFs.")
 
     # A simple message to guide the user if no file is uploaded yet.
     else:
-        st.info("Please upload a PDF file to begin.")
+        st.info("Please upload your PDF files to begin.")
 
 # Run the main function when the script is executed.
 if __name__ == "__main__":
     main()
+
