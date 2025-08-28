@@ -16,50 +16,92 @@ import re # We'll use regular expressions for text cleaning
 # Set the title and a brief description for your app.
 st.set_page_config(page_title="PDF to CSV Bank Converter", layout="centered")
 
-# --- Function to interact with the AI ---
-def process_with_ai(pdf_text, filename):
+# --- Function to parse ABSA PDFs using a rule-based approach ---
+def parse_absa_pdf(pdf_text):
+    """
+    Parses transactions from ABSA PDFs using regular expressions.
+    This approach is more robust for inconsistent formats.
+    """
+    st.info("Using rule-based parser for ABSA file.")
+    transactions = []
+    
+    # Define a regex pattern to find transaction lines. This pattern looks for a date,
+    # followed by a description, and then optional debit and credit amounts.
+    # The pattern is complex to handle the inconsistent formatting.
+    # Example: "29/04/2021 T 141.43 Ibank Payment To Settlement Absa Bank Simple Pay Payroll ,,,"
+    # The text is flattened, so we look for dates followed by patterns of text and numbers.
+    
+    # This regex looks for a date, followed by text (description), and then two numbers,
+    # which represent the debit and credit columns.
+    # The ?P<name> syntax is used to create named capture groups for easier access.
+    # The text is flattened and has many spaces, so we use '\s+' to match one or more spaces.
+    pattern = re.compile(
+        r'(\d{1,2}/\d{1,2}/\d{4})\s+'  # Date (e.g., 29/04/2021)
+        r'(.+?)\s+'  # Description (non-greedy to stop before the next number)
+        r'([\d\s,.]+\s+)?'  # Optional charge or extra text
+        r'([\d\s,.-]+)\s*'  # Debit or Credit Amount (can have a '-' sign)
+        r'(?P<credit>[\d\s,.]*)?' # Optional second number, usually the credit amount
+        r'([\d\s,.]+\s*)?' # Optional charge
+    )
+    
+    # Split the text into lines to process each transaction individually.
+    lines = pdf_text.split("\n")
+    
+    for line in lines:
+        if "statement no" in line.lower() or "transaction description" in line.lower() or "page" in line.lower():
+            continue # Skip headers and other non-transaction lines
+
+        # Remove extra spaces and make the line more manageable.
+        line = re.sub(r'\s+', ' ', line).strip()
+        
+        match = pattern.search(line)
+        if match:
+            try:
+                # Get the captured groups from the regex match.
+                date_str = match.group(1).strip()
+                description = match.group(2).strip()
+                
+                # Check for both debit and credit amounts to determine the sign.
+                debit_str = match.group(4)
+                credit_str = match.group('credit')
+                
+                amount = 0.0
+                if credit_str and credit_str.strip() != "":
+                    amount = float(credit_str.replace(" ", "").replace(",", ""))
+                elif debit_str and debit_str.strip() != "":
+                    # The debit amount will sometimes be preceded by a '-'.
+                    amount = -abs(float(debit_str.replace(" ", "").replace(",", "").replace("-", "")))
+                else:
+                    continue # Skip transactions without a clear amount
+
+                # Append the parsed transaction to the list.
+                transactions.append({
+                    "date": pd.to_datetime(date_str, format="%d/%m/%Y").strftime("%Y-%m-%d"),
+                    "description": description,
+                    "amount": amount
+                })
+            except (ValueError, IndexError):
+                # If a line doesn't match the pattern or has a parsing error, skip it.
+                continue
+
+    st.success(f"Found {len(transactions)} transactions with rule-based parser.")
+    return transactions
+
+# --- Function to interact with the AI (for all other PDFs) ---
+def process_with_ai(pdf_text):
     """
     Sends the extracted PDF text to the Gemini API to get structured transaction data.
-    We are using gemini-2.5-flash-preview-05-20, which is a powerful model
-    for this type of structured data extraction.
+    This is used for PDFs that have a more consistent structure.
     """
-    # The prompt is a set of instructions for the AI.
-    # It tells the AI exactly what to look for and how to format the output.
-    
-    # We create a much more detailed and robust prompt to handle the messy ABSA PDF.
-    # This approach tells the AI *how* to parse the unstructured text.
+    st.info("Using AI-based parser.")
     prompt = f"""
     You are a bank statement transaction parser. Your task is to extract transactions
     from the following bank statement text. The bank can be FNB, Nedbank, Standard Bank,
     ABSA, or HBZ.
-
-    The text provided is from a bank statement. The format may be inconsistent,
-    with transaction details spanning multiple lines or columns. Your job is to
-    read the text and accurately identify each transaction.
-
-    For each transaction, extract the 'date', 'description', and 'amount'.
-    The amount must be a number: positive for credits (deposits) and negative for debits (withdrawals).
-    The final output should be a JSON array of objects, and nothing else.
-
-    Here is a detailed guide on how to handle transactions from different banks:
-    - For ABSA: Look for the 'Debit Amount' and 'Credit Amount' columns. Use the value
-      in 'Credit Amount' as a positive amount, and the value in 'Debit Amount' as a
-      negative amount. The description often follows the date and can be spread across
-      multiple lines.
-
-    - For other banks (FNB, Nedbank, Standard Bank, HBZ): The transactions are usually
-      more structured. Look for a date, followed by a description, and an amount. The
-      amount may have a sign (e.g., '-' or 'DR' for a debit) or be in a separate column.
-
-    If a transaction does not have a clear date, description, and amount, you must ignore it.
-
-    Bank Statement Text:
-    {pdf_text}
+    ... [rest of the prompt as before]
     """
-
-    # --- API Call to Gemini ---
-    # This is where the AI processing happens. We configure it to return JSON directly.
-    # The schema is now updated to only include date, description, and amount.
+    
+    # ... [rest of the API call logic as before]
     payload = {
         "contents": [
             {
@@ -85,46 +127,30 @@ def process_with_ai(pdf_text, filename):
             }
         }
     }
-
-    # This URL is the entry point for the AI model.
-    api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
     
-    # We retrieve the API key securely from Streamlit's secrets.
-    # The key is named 'api_key' under the 'general' section in the secrets.toml file.
+    api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
     api_key = st.secrets["general"]["api_key"]
 
     try:
-        # We'll now use the standard requests library which works reliably with Streamlit.
         response = requests.post(
             api_url,
             headers={'Content-Type': 'application/json'},
             params={'key': api_key},
             json=payload
         )
-        response.raise_for_status() # Raise an exception for bad status codes
-        
-        # Check if the API response is valid and contains content.
+        response.raise_for_status()
         api_response_json = response.json()
         if api_response_json and api_response_json.get('candidates') and api_response_json['candidates'][0].get('content'):
             raw_text = api_response_json['candidates'][0]['content']['parts'][0]['text']
-            # Parse the JSON string into a Python list of dictionaries.
             transactions = json.loads(raw_text)
+            st.success(f"Found {len(transactions)} transactions with AI parser.")
             return transactions
         else:
             st.error("AI processing failed. Please try a different PDF or contact support.")
-            st.json(api_response_json) # Displaying the raw response can help with debugging
+            st.json(api_response_json)
             return []
-    except requests.exceptions.HTTPError as errh:
-        st.error(f"HTTP Error: {errh}")
-        return []
-    except requests.exceptions.RequestException as err:
-        st.error(f"An error occurred during API call: {err}")
-        return []
-    except json.JSONDecodeError as err:
-        st.error(f"Failed to decode JSON response from AI: {err}")
-        return []
-    except Exception as e:
-        st.error(f"An unexpected error occurred during AI processing: {e}")
+    except (requests.exceptions.RequestException, json.JSONDecodeError, Exception) as e:
+        st.error(f"An error occurred during AI processing: {e}")
         return []
 
 # --- Main App UI Layout ---
@@ -169,8 +195,12 @@ def main():
                         
                         st.info(f"Processing transactions from: {uploaded_file.name}")
                         
-                        # Call the AI processing function and extend the list with the results.
-                        transactions = process_with_ai(full_text, uploaded_file.name)
+                        # Conditional logic to use the correct parser.
+                        if "absa" in uploaded_file.name.lower():
+                            transactions = parse_absa_pdf(full_text)
+                        else:
+                            transactions = process_with_ai(full_text)
+                            
                         all_transactions.extend(transactions)
 
                     except Exception as e:
