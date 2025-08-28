@@ -10,18 +10,46 @@ import base64
 import io
 import requests # We will use the standard requests library for API calls
 import os # Import the os module to use environment variables
+import re # We'll use regular expressions for text cleaning
 
 # --- Main App Configuration ---
 # Set the title and a brief description for your app.
 st.set_page_config(page_title="PDF to CSV Bank Converter", layout="centered")
 
+# --- Function to clean text for ABSA PDFs ---
+def clean_text_for_absa(text):
+    """
+    This function specifically pre-processes text from ABSA PDFs.
+    It cleans up line breaks and attempts to re-align fragmented transaction lines
+    before sending the text to the AI for parsing.
+    """
+    # Replace common newline and tab characters with a single space to combine fragmented lines.
+    cleaned_text = re.sub(r'[\r\n]+', ' ', text)
+    
+    # Try to clean up spaces that separate columns, replacing them with a more consistent separator.
+    cleaned_text = re.sub(r'\s{2,}', ' | ', cleaned_text)
+
+    # Some manual cleaning for common patterns. This makes the text more structured.
+    cleaned_text = cleaned_text.replace("Acb Credit | Yoco", "Acb Credit Yoco")
+    
+    # Re-insert newlines at a point where a transaction likely ends.
+    # This is an educated guess based on the PDF's format.
+    cleaned_text = cleaned_text.replace(" | Balance | ", " | Balance |\n")
+
+    return cleaned_text
+
 # --- Function to interact with the AI ---
-def process_with_ai(pdf_text):
+def process_with_ai(pdf_text, filename):
     """
     Sends the extracted PDF text to the Gemini API to get structured transaction data.
     We are using gemini-2.5-flash-preview-05-20, which is a powerful model
     for this type of structured data extraction.
     """
+    # Conditionally clean the text if the file seems to be an ABSA statement.
+    if "absa" in filename.lower():
+        st.info("Detected ABSA statement. Pre-processing text for better accuracy.")
+        pdf_text = clean_text_for_absa(pdf_text)
+    
     # The prompt is a set of instructions for the AI.
     # It tells the AI exactly what to look for and how to format the output.
     prompt = f"""
@@ -29,7 +57,6 @@ def process_with_ai(pdf_text):
     from the following bank statement text. The bank can be FNB, Nedbank, Standard Bank,
     ABSA, or HBZ.
 
-    The text provided is from an ABSA bank statement.
     The transactions are in a table that may not be perfectly aligned. You must carefully
     extract the 'Date', 'Transaction Description', and either the 'Debit Amount' or
     'Credit Amount'.
@@ -163,7 +190,7 @@ def main():
                         st.info(f"Processing transactions from: {uploaded_file.name}")
                         
                         # Call the AI processing function and extend the list with the results.
-                        transactions = process_with_ai(full_text)
+                        transactions = process_with_ai(full_text, uploaded_file.name)
                         all_transactions.extend(transactions)
 
                     except Exception as e:
@@ -197,9 +224,3 @@ def main():
 # Run the main function when the script is executed.
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
