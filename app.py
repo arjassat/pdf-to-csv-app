@@ -16,28 +16,6 @@ import re # We'll use regular expressions for text cleaning
 # Set the title and a brief description for your app.
 st.set_page_config(page_title="PDF to CSV Bank Converter", layout="centered")
 
-# --- Function to clean text for ABSA PDFs ---
-def clean_text_for_absa(text):
-    """
-    This function specifically pre-processes text from ABSA PDFs.
-    It cleans up line breaks and attempts to re-align fragmented transaction lines
-    before sending the text to the AI for parsing.
-    """
-    # Replace common newline and tab characters with a single space to combine fragmented lines.
-    cleaned_text = re.sub(r'[\r\n]+', ' ', text)
-    
-    # Try to clean up spaces that separate columns, replacing them with a more consistent separator.
-    cleaned_text = re.sub(r'\s{2,}', ' | ', cleaned_text)
-
-    # Some manual cleaning for common patterns. This makes the text more structured.
-    cleaned_text = cleaned_text.replace("Acb Credit | Yoco", "Acb Credit Yoco")
-    
-    # Re-insert newlines at a point where a transaction likely ends.
-    # This is an educated guess based on the PDF's format.
-    cleaned_text = cleaned_text.replace(" | Balance | ", " | Balance |\n")
-
-    return cleaned_text
-
 # --- Function to interact with the AI ---
 def process_with_ai(pdf_text, filename):
     """
@@ -45,33 +23,35 @@ def process_with_ai(pdf_text, filename):
     We are using gemini-2.5-flash-preview-05-20, which is a powerful model
     for this type of structured data extraction.
     """
-    # Conditionally clean the text if the file seems to be an ABSA statement.
-    if "absa" in filename.lower():
-        st.info("Detected ABSA statement. Pre-processing text for better accuracy.")
-        pdf_text = clean_text_for_absa(pdf_text)
-    
     # The prompt is a set of instructions for the AI.
     # It tells the AI exactly what to look for and how to format the output.
+    
+    # We create a much more detailed and robust prompt to handle the messy ABSA PDF.
+    # This approach tells the AI *how* to parse the unstructured text.
     prompt = f"""
     You are a bank statement transaction parser. Your task is to extract transactions
     from the following bank statement text. The bank can be FNB, Nedbank, Standard Bank,
     ABSA, or HBZ.
 
-    The transactions are in a table that may not be perfectly aligned. You must carefully
-    extract the 'Date', 'Transaction Description', and either the 'Debit Amount' or
-    'Credit Amount'.
+    The text provided is from a bank statement. The format may be inconsistent,
+    with transaction details spanning multiple lines or columns. Your job is to
+    read the text and accurately identify each transaction.
 
-    Format the output as a JSON array of objects.
+    For each transaction, extract the 'date', 'description', and 'amount'.
     The amount must be a number: positive for credits (deposits) and negative for debits (withdrawals).
-    The output should only be the JSON, with no other text or explanation.
+    The final output should be a JSON array of objects, and nothing else.
 
-    Fields to extract for each transaction object:
-    - 'date': The transaction date in 'YYYY-MM-DD' format.
-    - 'description': A concise description of the transaction.
-    - 'amount': The transaction amount as a number (e.g., 100.50 or -50.00).
+    Here is a detailed guide on how to handle transactions from different banks:
+    - For ABSA: Look for the 'Debit Amount' and 'Credit Amount' columns. Use the value
+      in 'Credit Amount' as a positive amount, and the value in 'Debit Amount' as a
+      negative amount. The description often follows the date and can be spread across
+      multiple lines.
+
+    - For other banks (FNB, Nedbank, Standard Bank, HBZ): The transactions are usually
+      more structured. Look for a date, followed by a description, and an amount. The
+      amount may have a sign (e.g., '-' or 'DR' for a debit) or be in a separate column.
 
     If a transaction does not have a clear date, description, and amount, you must ignore it.
-    Pay close attention to the column headers 'Debit Amount' and 'Credit Amount' to determine the transaction sign.
 
     Bank Statement Text:
     {pdf_text}
@@ -224,3 +204,4 @@ def main():
 # Run the main function when the script is executed.
 if __name__ == "__main__":
     main()
+
