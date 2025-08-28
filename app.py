@@ -29,9 +29,13 @@ def process_with_ai(pdf_text):
     from the following bank statement text. The bank can be FNB, Nedbank, Standard Bank,
     ABSA, or HBZ.
 
-    For each transaction, extract the date, description, and amount.
+    The text provided is from an ABSA bank statement.
+    The transactions are in a table that may not be perfectly aligned. You must carefully
+    extract the 'Date', 'Transaction Description', and either the 'Debit Amount' or
+    'Credit Amount'.
+
     Format the output as a JSON array of objects.
-    The amount must be a number: positive for credits (CR/deposit) and negative for debits (DR/withdrawal).
+    The amount must be a number: positive for credits (deposits) and negative for debits (withdrawals).
     The output should only be the JSON, with no other text or explanation.
 
     Fields to extract for each transaction object:
@@ -40,6 +44,7 @@ def process_with_ai(pdf_text):
     - 'amount': The transaction amount as a number (e.g., 100.50 or -50.00).
 
     If a transaction does not have a clear date, description, and amount, you must ignore it.
+    Pay close attention to the column headers 'Debit Amount' and 'Credit Amount' to determine the transaction sign.
 
     Bank Statement Text:
     {pdf_text}
@@ -192,6 +197,7 @@ def main():
 # Run the main function when the script is executed.
 if __name__ == "__main__":
     main()
+
 
 
 
